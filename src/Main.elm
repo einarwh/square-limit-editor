@@ -1,7 +1,7 @@
 module Main exposing (main)
 
 import Browser
-import Browser.Events exposing (onClick, onMouseMove, onMouseDown)
+import Browser.Events exposing (onClick, onMouseMove, onMouseDown, onMouseUp)
 import Html exposing (Html, text, div)
 import Svg exposing (..)
 import Svg.Attributes exposing (..)
@@ -9,13 +9,16 @@ import Json.Decode as Decode
 
 type alias Pos = { x : Float, y : Float }
 
-type DragBezierPoint = Moving Pos | Fixed Pos
+type DragBezierPoint = MovingPoint Pos | FixedPoint Pos
 
 type alias BezierLine = { start : Pos, cp1 : Pos, cp2 : Pos, end : Pos }
 
 type alias DragBezierLine = { start : DragBezierPoint, cp1 : DragBezierPoint, cp2 : DragBezierPoint, end : DragBezierPoint }
 
-type Model = Dragging { line : DragBezierLine, lines : List BezierLine, message : String }
+type DraggingBezierLine = FixedLine BezierLine | ChangingLine DragBezierLine
+
+type Model = Dragging { dragLines : List DraggingBezierLine, message : String }
+             | Dragged { lines : List BezierLine, message : String }
              | Drawing { startPos: Pos, currentPos: Pos, lines : List BezierLine, message : String }
              | Default { lines: List BezierLine, message : String }
 
@@ -29,6 +32,7 @@ type Msg = LeftClick Pos
            | RightClick Pos
            | MouseMove Pos
            | MouseDown Pos
+           | MouseUp Pos
 
 createBezierLine : Pos -> Pos -> BezierLine
 createBezierLine start end = 
@@ -51,38 +55,107 @@ distanceBetweenPoints pos1 pos2 =
 
 closeEnough: Pos -> Pos -> Bool
 closeEnough pos1 pos2 = 
-    distanceBetweenPoints pos1 pos2 < 2 
+    distanceBetweenPoints pos1 pos2 < 3 
 
 findPointInBezier : Pos -> BezierLine -> Maybe DragBezierLine 
 findPointInBezier pos bezier = 
     if closeEnough pos bezier.start then 
-        Just { start = Moving bezier.start, cp1 = Fixed bezier.cp1, cp2 = Fixed bezier.cp2, end = Fixed bezier.end }
+        Just { start = MovingPoint bezier.start
+             , cp1 = FixedPoint bezier.cp1
+             , cp2 = FixedPoint bezier.cp2
+             , end = FixedPoint bezier.end }
     else if closeEnough pos bezier.cp1 then 
-        Just { start = Fixed bezier.start, cp1 = Moving bezier.cp1, cp2 = Fixed bezier.cp2, end = Fixed bezier.end }
+        Just { start = FixedPoint bezier.start
+             , cp1 = MovingPoint bezier.cp1
+             , cp2 = FixedPoint bezier.cp2
+             , end = FixedPoint bezier.end }
     else if closeEnough pos bezier.cp2 then 
-        Just { start = Fixed bezier.start, cp1 = Fixed bezier.cp1, cp2 = Moving bezier.cp2, end = Fixed bezier.end }
+        Just { start = FixedPoint bezier.start
+             , cp1 = FixedPoint bezier.cp1
+             , cp2 = MovingPoint bezier.cp2
+             , end = FixedPoint bezier.end }
     else if closeEnough pos bezier.end then 
-        Just { start = Fixed bezier.start, cp1 = Fixed bezier.cp1, cp2 = Fixed bezier.cp2, end = Moving bezier.end }
+        Just { start = FixedPoint bezier.start
+             , cp1 = FixedPoint bezier.cp1
+             , cp2 = FixedPoint bezier.cp2
+             , end = MovingPoint bezier.end }
     else 
         Nothing
 
-checkGrab : Pos -> List BezierLine -> (Maybe DragBezierLine, List BezierLine)
-checkGrab pos beziers = 
+checkGrab : Pos -> List BezierLine -> Bool -> List DraggingBezierLine
+checkGrab pos beziers found = 
     case beziers of 
-        [] -> (Nothing, [])
-        h :: t -> 
-            case findPointInBezier pos h of 
-                Just dragBezier -> (Just dragBezier, t)
-                Nothing -> 
-                    case checkGrab pos t of 
-                        (Nothing, _) -> (Nothing, beziers)
-                        (Just x, normalLines) -> (Just x, h :: normalLines)
+        [] -> []
+        h :: t ->
+            if found then 
+                FixedLine h :: checkGrab pos t True 
+            else 
+                case findPointInBezier pos h of 
+                    Just dragBezier -> 
+                        ChangingLine dragBezier :: checkGrab pos t True 
+                    Nothing -> 
+                        FixedLine h :: checkGrab pos t False 
+
+grabbed : List DraggingBezierLine -> Bool
+grabbed dragBeziers = 
+    List.any (\bz -> case bz of ChangingLine _ -> True 
+                                FixedLine _ -> False) dragBeziers
+
+toNormalLine : DraggingBezierLine -> BezierLine 
+toNormalLine dragLine = 
+    case dragLine of
+        FixedLine line -> line 
+        ChangingLine changing ->  
+            { start = getPositionOfDragPoint changing.start 
+            , cp1 = getPositionOfDragPoint changing.cp1
+            , cp2 = getPositionOfDragPoint changing.cp2 
+            , end = getPositionOfDragPoint changing.end }
+
+toNormalLines : List DraggingBezierLine -> List BezierLine
+toNormalLines dragLines = 
+    List.map toNormalLine dragLines
+
+updateDragPoint : Pos -> DragBezierPoint -> DragBezierPoint 
+updateDragPoint pos point =
+    case point of 
+        FixedPoint fixed -> FixedPoint fixed 
+        MovingPoint moving -> MovingPoint pos
+
+updateDragLine : Pos -> DragBezierLine -> DragBezierLine
+updateDragLine pos dragLine = 
+    { start = updateDragPoint pos dragLine.start
+    , cp1 = updateDragPoint pos dragLine.cp1 
+    , cp2 = updateDragPoint pos dragLine.cp2 
+    , end = updateDragPoint pos dragLine.end }
+
+updateDraggingLine : Pos -> DraggingBezierLine -> DraggingBezierLine
+updateDraggingLine pos draggingLine = 
+    case draggingLine of 
+        FixedLine line -> FixedLine line 
+        ChangingLine changing -> ChangingLine (updateDragLine pos changing)
+
+updateDraggingLines : Pos -> List DraggingBezierLine -> List DraggingBezierLine
+updateDraggingLines pos draggingLines = 
+    List.map (updateDraggingLine pos) draggingLines
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case model of 
-        Dragging _ -> 
-            (model, Cmd.none)
+        Dragging { dragLines, message } -> 
+            case msg of 
+                MouseMove pos -> 
+                    (Dragging { dragLines = updateDraggingLines pos dragLines, message = message }, Cmd.none)
+                MouseUp pos -> 
+                    let
+                        lines = toNormalLines dragLines
+                    in
+                    
+                    (Dragged { lines = lines, message = "Dragged" }, Cmd.none)
+                _ -> (model, Cmd.none)
+        Dragged { lines, message } -> 
+            case msg of 
+                _ -> 
+                   (Default { lines = lines, message = "Default" }, Cmd.none)
         Drawing drawState -> 
             case msg of 
                 LeftClick pos -> 
@@ -114,20 +187,16 @@ update msg model =
                     -- Check to see if we click down to grab anything?
                     -- Check each point of each line.
                     -- Drag StartPoint | ControlPoint1 | ControlPoint2 | EndPoint
-
-                    let 
-                        newModel2 = Default { message = "Grabbing?"
-                                            , lines = lines }
-                    in 
-                        case checkGrab pos lines of 
-                            (Just dragBezier, normalLines) -> 
-                                let
-                                    newModel = Dragging { message = "Grabbing!"
-                                                        , lines = normalLines
-                                                        , line = dragBezier }
-                                in
-                                    (newModel, Cmd.none)
-                            (Nothing, _) -> (model, Cmd.none)
+                    let
+                        dragLines = checkGrab pos lines False
+                    in
+                        if grabbed dragLines then 
+                            let
+                                newModel = Dragging { message = "Dragging!"
+                                                    , dragLines = dragLines }
+                            in
+                                (newModel, Cmd.none)
+                        else (model, Cmd.none)                    
                 _ -> 
                     (model, Cmd.none)
 
@@ -161,15 +230,14 @@ createCurrentDrawingLine startPos endPos =
 getPositionOfDragPoint : DragBezierPoint -> Pos 
 getPositionOfDragPoint dragPoint = 
     case dragPoint of 
-        Fixed pt -> pt 
-        Moving pt -> pt
+        FixedPoint pt -> pt 
+        MovingPoint pt -> pt
 
 getFillOfDragPoint : DragBezierPoint -> String -> String 
 getFillOfDragPoint dragPoint color = 
     case dragPoint of 
-        Fixed _ -> "none"
-        Moving _ -> color
-
+        FixedPoint _ -> "none"
+        MovingPoint _ -> color
 
 createDragSvgLine : DragBezierLine -> List (Svg Msg)
 createDragSvgLine line = 
@@ -190,6 +258,12 @@ createDragSvgLine line =
         , Svg.circle [ cx xCp2Str, cy yCp2Str, r "3", stroke "red", fill (getFillOfDragPoint line.cp2 "red") ] []
         ]            
 
+createDraggingSvgLine : DraggingBezierLine -> List (Svg Msg)
+createDraggingSvgLine line = 
+    case line of 
+        ChangingLine changing -> createDragSvgLine changing
+        FixedLine fixed -> createSvgLine fixed
+
 getSvgElements : Model -> List (Svg Msg)
 getSvgElements model = 
     case model of 
@@ -199,12 +273,16 @@ getSvgElements model =
                 currentLine = createCurrentDrawingLine startPos currentPos 
             in 
                 currentLine :: svgLines
-        Dragging { lines, line } -> 
+        Dragging { dragLines } -> 
             let 
-                svgLines = List.concatMap createSvgLine lines
-                dragLine = createDragSvgLine line 
+                svgLines = List.concatMap createDraggingSvgLine dragLines
             in 
-                dragLine ++ svgLines
+                svgLines
+        Dragged { lines } -> 
+            let
+                svgLines = List.concatMap createSvgLine lines
+            in        
+                svgLines
         Default { lines } -> 
             let
                 svgLines = List.concatMap createSvgLine lines
@@ -218,6 +296,8 @@ getMessageElement model =
             Html.text ("Drawing..." ++ message)
         Dragging { message } -> 
             Html.text ("Dragging..." ++ message)
+        Dragged { message } -> 
+            Html.text ("Dragged..." ++ message)
         Default { message } -> 
             Html.text ("Default..." ++ message)
 
@@ -240,7 +320,6 @@ view model =
               ]
         ]
 
-
 subscriptions : Model -> Sub Msg
 subscriptions model =
     let 
@@ -253,7 +332,12 @@ subscriptions model =
                 [ onClick (Decode.map2 (\a -> \b -> LeftClick { x = a, y = b }) offsetX offsetY)
                 , onMouseMove (Decode.map2 (\a -> \b -> MouseMove { x = a, y = b }) offsetX offsetY) ]
             Dragging _ -> 
-                Sub.batch []
+                Sub.batch
+                [ onMouseUp (Decode.map2 (\a -> \b -> MouseUp { x = a, y = b }) offsetX offsetY)
+                , onMouseMove (Decode.map2 (\a -> \b -> MouseMove { x = a, y = b }) offsetX offsetY) ]
+            Dragged _ -> 
+                Sub.batch
+                [ onClick (Decode.map2 (\a -> \b -> MouseUp { x = a, y = b }) offsetX offsetY) ]
             Default _ -> 
                 Sub.batch 
                 [ onClick (Decode.map2 (\a -> \b -> LeftClick { x = a, y = b }) offsetX offsetY)
