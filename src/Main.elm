@@ -210,8 +210,9 @@ createSvgLine line =
         yCp1Str = String.fromFloat line.cp1.y
         xCp2Str = String.fromFloat line.cp2.x
         yCp2Str = String.fromFloat line.cp2.y
+        dStr = "M" ++ x1Str ++ " " ++ y1Str ++ " C " ++ xCp1Str ++ " " ++ yCp1Str ++ ", " ++ xCp2Str ++ " " ++ yCp2Str ++ ", " ++ x2Str ++ " " ++ y2Str
     in  
-        [ Svg.line [ x1 x1Str, y1 y1Str, x2 x2Str, y2 y2Str, stroke "black" ] []
+        [ Svg.path [ d dStr, stroke "black", fill "none" ] []
         , Svg.circle [ cx x1Str, cy y1Str, r "3", stroke "blue", fill "none" ] []
         , Svg.circle [ cx x2Str, cy y2Str, r "3", stroke "blue", fill "none" ] []
         , Svg.circle [ cx xCp1Str, cy yCp1Str, r "3", stroke "red", fill "none" ] []
@@ -250,11 +251,12 @@ createDragSvgLine line =
         yCp1Str = String.fromFloat (getPositionOfDragPoint line.cp1).y
         xCp2Str = String.fromFloat (getPositionOfDragPoint line.cp2).x
         yCp2Str = String.fromFloat (getPositionOfDragPoint line.cp2).y
+        dStr = "M" ++ x1Str ++ " " ++ y1Str ++ " C " ++ xCp1Str ++ " " ++ yCp1Str ++ ", " ++ xCp2Str ++ " " ++ yCp2Str ++ ", " ++ x2Str ++ " " ++ y2Str
     in  
-        [ Svg.line [ x1 x1Str, y1 y1Str, x2 x2Str, y2 y2Str, stroke "black" ] []
-        , Svg.circle [ cx x1Str, cy y1Str, r "3", stroke "purple", fill (getFillOfDragPoint line.start "purple") ] []
+        [ Svg.path [ d dStr, stroke "black", fill "none" ] []
+        , Svg.circle [ cx x1Str, cy y1Str, r "3", stroke "blue", fill (getFillOfDragPoint line.start "blue") ] []
         , Svg.circle [ cx x2Str, cy y2Str, r "3", stroke "blue", fill (getFillOfDragPoint line.end "blue") ] []
-        , Svg.circle [ cx xCp1Str, cy yCp1Str, r "3", stroke "green", fill (getFillOfDragPoint line.cp1 "green") ] []
+        , Svg.circle [ cx xCp1Str, cy yCp1Str, r "3", stroke "red", fill (getFillOfDragPoint line.cp1 "red") ] []
         , Svg.circle [ cx xCp2Str, cy yCp2Str, r "3", stroke "red", fill (getFillOfDragPoint line.cp2 "red") ] []
         ]            
 
