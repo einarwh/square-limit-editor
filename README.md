@@ -1,1 +1,1 @@
-# squirrel-draw
+# Square Limit Editor
