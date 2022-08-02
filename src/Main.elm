@@ -9,6 +9,16 @@ import Svg exposing (..)
 import Svg.Attributes exposing (..)
 import Svg.Events
 import Json.Decode as Decode
+import Box exposing (..)
+import Picture exposing (..)
+import Gather exposing (gatherBoxes)
+import Recursion exposing (sideBoxes, cornerBoxes)
+import Letter exposing (..)
+import Figure exposing (..)
+import Fishy exposing (fishShapes)
+import Triangular exposing (..)
+import Fitting exposing (createPicture)
+import Decor exposing (render)
 
 type alias Pos = { x : Float, y : Float }
 
@@ -67,6 +77,7 @@ init flags =
 type Msg = JustClick 
            | MouseMove Pos
            | MouseUp Pos
+           | ChangeRendering Render 
            | SelectElement LineId
            | UnselectElement LineId
            | HoverElement LineId
@@ -103,7 +114,11 @@ createBezierLine id start end reflect =
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
-    case model of 
+  case msg of 
+    ChangeRendering render ->
+      ({model | render = render, status = "rendering..."}, Cmd.none)
+    _ -> 
+      case model of 
         { editor, currentLineNo, reflect, render, history, pos } -> 
             case editor of
                     Stopped { id } -> 
@@ -391,6 +406,13 @@ getMessageElement model =
                 Hovering _ -> 
                     Html.text ("Hovering..." ++ model.status)
 
+renderChoice : String -> Render -> Render -> String -> List (Html Msg)
+renderChoice idValue render model textValue = 
+    let checkedValue = render == model 
+    in  
+      [ Html.input [ type_ "radio", id idValue, name "render", Html.Attributes.checked checkedValue, Html.Events.onInput (\_ -> (ChangeRendering render)) ] []
+      , Html.label [ Html.Attributes.for idValue ] [ Html.text textValue ] ]
+
 view : Model -> Html Msg
 view model =
     let
@@ -401,6 +423,19 @@ view model =
           , createTriangleLine { x = 100.0, y = 300.0 } { x = 300.0, y = 300.0 }
           , createTriangleLine { x = 100.0, y = 100.0 } { x = 300.0, y = 300.0 }
           ]
+        box = { a = { dx = 100.0, dy = 100.0 }
+              , b = { dx = 200.0, dy = 0.0 }
+              , c = { dx = 0.0, dy = 200.0 } }
+        pict = createPicture fLetter
+        transform = 
+            case model.render of 
+                Simple -> identity 
+                Tile -> ttile 
+                Limit -> squareLimit 3
+        rendering = box |> transform pict |> render []
+        renderChoices = renderChoice "simple" Simple model.render "Simple"
+                        ++ renderChoice "tile" Tile model.render "Tile"
+                        ++ renderChoice "limit" Limit model.render "Limit" 
     in
         div [] 
         [
@@ -440,20 +475,19 @@ view model =
                         [ Html.Attributes.style "background-color" "green" ] 
                         [ tr 
                             [] 
-                            [ Html.button [] [ Html.text "Simple" ]
-                            , Html.button [] [ Html.text "T-tile" ]
-                            , Html.button [] [ Html.text "Limit" ] ]
+                            renderChoices
                         , tr 
                             [] 
                             [ td 
                                 [] 
-                                [ svg
-                                    [ width "400"
-                                    , height "400"
-                                    , viewBox "0 0 400 400"
-                                    , Html.Attributes.style "background-color" "yellow"
-                                    ]
-                                    svgElements] ] ] ] ]
+                                [rendering] ]]]]
+                                -- [ svg
+                                --     [ width "400"
+                                --     , height "400"
+                                --     , viewBox "0 0 400 400"
+                                --     , Html.Attributes.style "background-color" "yellow"
+                                --     ]
+                                --     svgElements] ] ] ] ]
                     ] ] 
 
 subscriptions : Model -> Sub Msg
