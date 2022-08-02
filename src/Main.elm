@@ -14,7 +14,7 @@ type alias Pos = { x : Float, y : Float }
 
 type alias LineId = String
 
-type alias BezierLine = { id : LineId, start : Pos, cp1 : Pos, cp2 : Pos, end : Pos }
+type alias BezierLine = { id : LineId, start : Pos, cp1 : Pos, cp2 : Pos, end : Pos, reflect : Bool }
 
 --type alias Line = { lineNo : Int, start : Pos }
 
@@ -88,8 +88,8 @@ onSvgMouseUp : msg -> Attribute msg
 onSvgMouseUp msg =
   Svg.Events.stopPropagationOn "mouseup" (Decode.map (\m-> (m, True)) (Decode.succeed msg))
 
-createBezierLine : LineId -> Pos -> Pos -> BezierLine
-createBezierLine id start end = 
+createBezierLine : LineId -> Pos -> Pos -> Bool -> BezierLine
+createBezierLine id start end reflect = 
     let dx = (end.x - start.x) / 3.0 
         dy = (end.y - start.y) / 3.0
     in 
@@ -98,6 +98,7 @@ createBezierLine id start end =
         , cp1 = { x = start.x + dx, y = start.y + dy } 
         , cp2 = { x = start.x + 2 * dx, y = start.y + 2 * dy } 
         , end = end
+        , reflect = reflect
         }
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -167,7 +168,7 @@ update msg model =
                                 -- End line now and add to lines.
                                 let 
                                     id = "path#" ++ String.fromInt currentLineNo
-                                    line = createBezierLine id startPos pos 
+                                    line = createBezierLine id startPos pos reflect
                                     act = AddLine line
                                     ed = Default 
                                 in 
