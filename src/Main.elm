@@ -18,45 +18,24 @@ type alias BezierLine = { id : LineId, start : Pos, cp1 : Pos, cp2 : Pos, end : 
 
 --type alias Line = { lineNo : Int, start : Pos }
 
+type LinePoint = StartPoint 
+                 | ControlPoint1 
+                 | ControlPoint2 
+                 | EndPoint
+
 type Action = AddLine BezierLine
-              | EditLine BezierLine
+              | EditLine LineId LinePoint Pos
               | DeleteLine LineId
 
 type LineStatus = NormalLine | SelectedLine | HoverLine
-
-type DragBezierPoint = MovingPoint Pos | FixedPoint Pos
-
-
-type alias DragBezierLine = { id : LineId, start : DragBezierPoint, cp1 : DragBezierPoint, cp2 : DragBezierPoint, end : DragBezierPoint }
-
-type DraggingBezierLine = FixedLine BezierLine | ChangingLine DragBezierLine 
-
--- Model 
---   Reflect? Y/N
---   Default
---     Select element -> Selected element
---     Start drawing (Left click) => Drawing
---   Drawing 
---     End drawing (Left click) => Default
---   Selected element
---     Delete element => Default
---     Unselect element => Default
---     Drag points on element => Dragging (still with selected element implicit)
---   Dragging (mouse button is down) 
---     Stop dragging (MouseUp) => Selected
--- Render : Simple | T-tile | Square Limit
 
 type Editor = 
   Default 
   | Drawing { startPos : Pos }
   | Selected { id : LineId }
   | Hovering { id : LineId }
-
---  Dragging { dragLines : List DraggingBezierLine, message : String }
---              | Dragged { lines : List BezierLine, message : String }
---              | Drawing { startPos: Pos, currentPos: Pos, lines : List BezierLine, message : String }
---              | Default { lines: List BezierLine, message : String }
---              | Selected { lines : List BezierLine, message : String}
+  | Dragging { id: LineId, point: LinePoint }
+  | Stopped { id : LineId }
 
 type Render = Simple | Tile | Limit
 
@@ -85,11 +64,8 @@ init flags =
     in
         (model, cmd)
 
-type Msg = LeftClick Pos
-           | RightClick Pos
-           | JustClick 
+type Msg = JustClick 
            | MouseMove Pos
-           | MouseDown Pos
            | MouseUp Pos
            | SelectElement LineId
            | UnselectElement LineId
@@ -97,10 +73,20 @@ type Msg = LeftClick Pos
            | UnhoverElement LineId
            | DeleteSelected
            | UndoAction
+           | StartDragLinePoint LineId LinePoint
+           | StopDragLinePoint LineId LinePoint
 
 onSvgClick : msg -> Attribute msg
 onSvgClick msg =
   Svg.Events.stopPropagationOn "click" (Decode.map (\m-> (m, True)) (Decode.succeed msg))
+
+onSvgMouseDown : msg -> Attribute msg
+onSvgMouseDown msg =
+  Svg.Events.stopPropagationOn "mousedown" (Decode.map (\m-> (m, True)) (Decode.succeed msg))
+
+onSvgMouseUp : msg -> Attribute msg
+onSvgMouseUp msg =
+  Svg.Events.stopPropagationOn "mouseup" (Decode.map (\m-> (m, True)) (Decode.succeed msg))
 
 createBezierLine : LineId -> Pos -> Pos -> BezierLine
 createBezierLine id start end = 
@@ -114,134 +100,66 @@ createBezierLine id start end =
         , end = end
         }
 
-distanceBetweenPoints: Pos -> Pos -> Float 
-distanceBetweenPoints pos1 pos2 = 
-    let
-        dx = pos1.x - pos2.x 
-        dy = pos1.y - pos2.y 
-    in 
-        (dx * dx + dy * dy) |> sqrt
-
-closeEnough: Pos -> Pos -> Bool
-closeEnough pos1 pos2 = 
-    distanceBetweenPoints pos1 pos2 < 3 
-
-findPointInBezier : Pos -> BezierLine -> Maybe DragBezierLine 
-findPointInBezier pos bezier = 
-    if closeEnough pos bezier.start then 
-        Just { id = bezier.id
-             , start = MovingPoint bezier.start
-             , cp1 = FixedPoint bezier.cp1
-             , cp2 = FixedPoint bezier.cp2
-             , end = FixedPoint bezier.end }
-    else if closeEnough pos bezier.cp1 then 
-        Just { id = bezier.id
-             , start = FixedPoint bezier.start
-             , cp1 = MovingPoint bezier.cp1
-             , cp2 = FixedPoint bezier.cp2
-             , end = FixedPoint bezier.end }
-    else if closeEnough pos bezier.cp2 then 
-        Just { id = bezier.id
-             , start = FixedPoint bezier.start
-             , cp1 = FixedPoint bezier.cp1
-             , cp2 = MovingPoint bezier.cp2
-             , end = FixedPoint bezier.end }
-    else if closeEnough pos bezier.end then 
-        Just { id = bezier.id
-             , start = FixedPoint bezier.start
-             , cp1 = FixedPoint bezier.cp1
-             , cp2 = FixedPoint bezier.cp2
-             , end = MovingPoint bezier.end }
-    else 
-        Nothing
-
-checkGrab : Pos -> List BezierLine -> Bool -> List DraggingBezierLine
-checkGrab pos beziers found = 
-    case beziers of 
-        [] -> []
-        h :: t ->
-            if found then 
-                FixedLine h :: checkGrab pos t True 
-            else 
-                case findPointInBezier pos h of 
-                    Just dragBezier -> 
-                        ChangingLine dragBezier :: checkGrab pos t True 
-                    Nothing -> 
-                        FixedLine h :: checkGrab pos t False 
-
-grabbed : List DraggingBezierLine -> Bool
-grabbed dragBeziers = 
-    List.any (\bz -> case bz of ChangingLine _ -> True 
-                                FixedLine _ -> False) dragBeziers
-
-toNormalLine : DraggingBezierLine -> BezierLine 
-toNormalLine dragLine = 
-    case dragLine of
-        FixedLine line -> line 
-        ChangingLine changing ->  
-            { id = "."
-            , start = getPositionOfDragPoint changing.start 
-            , cp1 = getPositionOfDragPoint changing.cp1
-            , cp2 = getPositionOfDragPoint changing.cp2 
-            , end = getPositionOfDragPoint changing.end }
-
-toNormalLines : List DraggingBezierLine -> List BezierLine
-toNormalLines dragLines = 
-    List.map toNormalLine dragLines
-
-updateDragPoint : Pos -> DragBezierPoint -> DragBezierPoint 
-updateDragPoint pos point =
-    case point of 
-        FixedPoint fixed -> FixedPoint fixed 
-        MovingPoint moving -> MovingPoint pos
-
-updateDragLine : Pos -> DragBezierLine -> DragBezierLine
-updateDragLine pos dragLine = 
-    { id = dragLine.id
-    , start = updateDragPoint pos dragLine.start
-    , cp1 = updateDragPoint pos dragLine.cp1 
-    , cp2 = updateDragPoint pos dragLine.cp2 
-    , end = updateDragPoint pos dragLine.end }
-
-updateDraggingLine : Pos -> DraggingBezierLine -> DraggingBezierLine
-updateDraggingLine pos draggingLine = 
-    case draggingLine of 
-        FixedLine line -> FixedLine line 
-        ChangingLine changing -> ChangingLine (updateDragLine pos changing)
-
-updateDraggingLines : Pos -> List DraggingBezierLine -> List DraggingBezierLine
-updateDraggingLines pos draggingLines = 
-    List.map (updateDraggingLine pos) draggingLines
-
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case model of 
         { editor, currentLineNo, reflect, render, history, pos } -> 
             case editor of
+                    Stopped { id } -> 
+                        case msg of 
+                            JustClick -> 
+                                ({ model | editor = Selected {id=id} }, Cmd.none)
+                            MouseMove newPos -> 
+                                ({ model | pos = newPos }, Cmd.none)
+                            _ ->
+                                ({ model | editor = Selected {id=id} }, Cmd.none)
                     Selected { id } -> 
                         case msg of
+                            UndoAction -> 
+                                let
+                                    hist = case history of [] -> [] 
+                                                           _ :: t -> t
+                                in
+                                    ({model | history = hist }, Cmd.none)
+
                             DeleteSelected -> 
                                 let 
                                     act = DeleteLine id
                                     ed = Default 
                                 in 
                                     ({model | editor = ed, history = act :: history}, Cmd.none)
+                            HoverElement hoverId -> 
+                                let ed = Hovering { id = hoverId }
+                                in 
+                                    ({ model | editor = ed}, Cmd.none) 
 
                             UnselectElement clickId -> 
                                 let ed = Default 
                                 in 
                                     ({ model | editor = ed, status = "select..."}, Cmd.none) 
-                            -- JustClick -> 
-                            --     ({ model | editor = Default, status = "wel?"}, Cmd.none) 
-                            _ -> ({ model | status = "selected" }, Cmd.none)
+                            StartDragLinePoint lineId point -> 
+                                ({ model | editor = Dragging { id = lineId, point = point }, status = "select..."}, Cmd.none) 
+
+                            MouseMove newPos -> 
+                                ({ model | pos = newPos }, Cmd.none)
+
+                            JustClick  -> 
+                                ({ model | editor = Default }, Cmd.none)
+                            _ -> ({ model | status = "..." }, Cmd.none)
                     Hovering _ -> 
                         case msg of 
+                            MouseMove newPos -> 
+                                ({ model | pos = newPos }, Cmd.none)
                             SelectElement clickId -> 
                                 let ed = Selected { id = clickId }
                                 in 
                                     ({ model | editor = ed, status = "select..."}, Cmd.none) 
                             UnhoverElement _ -> 
-                                ({ model | status = "hovering", editor = Default }, Cmd.none)     
+                                ({ model | status = "hovering", editor = Default }, Cmd.none)
+                            StartDragLinePoint lineId point -> 
+                                ({ model | editor = Dragging { id = lineId, point = point }, status = "select..."}, Cmd.none) 
+                            JustClick -> 
+                                ({model | editor = Default} , Cmd.none)     
                             _ -> (model, Cmd.none)     
                     Drawing { startPos } -> 
                         case msg of 
@@ -258,13 +176,25 @@ update msg model =
                             MouseMove newPos -> 
                                 ({ model | pos = newPos }, Cmd.none)
                             _ -> (model, Cmd.none)
+                    Dragging { id, point } -> 
+                        case msg of 
+                            MouseMove newPos -> 
+                                ({ model | pos = newPos, status = "dragging..." }, Cmd.none)
+                            StopDragLinePoint lineId pt -> 
+                                let
+                                    act = EditLine lineId pt pos
+                                in
+                                    ({ model | editor = Stopped { id = id }, history = act :: history, status = "stopped..." }, Cmd.none) 
+                            MouseUp pt -> 
+                                ({ model | pos = pt, editor = Selected { id = id }, status = "mouseup..."}, Cmd.none) 
+                            _ -> ({ model | status = "somethig?" }, Cmd.none)
                     Default ->
                         -- Not currently doing anything! 
                         case msg of 
                             UndoAction -> 
                                 let
                                     hist = case history of [] -> [] 
-                                                           h :: t -> t
+                                                           _ :: t -> t
                                 in
                                     ({model | history = hist }, Cmd.none)
                             JustClick -> 
@@ -302,24 +232,22 @@ createSvgLine status line =
     in  
         case status of 
             NormalLine -> 
-               [ Svg.path [ id pathId, d dStr, stroke "black", strokeWidth "1", fill "none", onSvgClick (SelectElement pathId ), Svg.Events.onMouseOver (HoverElement pathId )  ] [] ] 
+               [ Svg.path [ id pathId, d dStr, stroke "black", strokeWidth "1", fill "none", onSvgClick (SelectElement pathId ), Svg.Events.onMouseOver (HoverElement pathId) ] [] ] 
             SelectedLine -> 
                 [ Svg.path [ id pathId, d dStr, stroke "black", strokeWidth "1", fill "none", onSvgClick (UnselectElement pathId) ] []
-                --[ Svg.path [ d dStr, stroke "black", fill "none" ] []
-                , Svg.circle [ id (pathId ++ "-sp"), cx x1Str, cy y1Str, r "3", stroke "blue", fill "none" ] []
-                , Svg.circle [ id (pathId ++ "-ep"), cx x2Str, cy y2Str, r "3", stroke "blue", fill "none" ] []
-                , Svg.circle [ id (pathId ++ "-cp1"), cx xCp1Str, cy yCp1Str, r "3", stroke "red", fill "none" ] []
-                , Svg.circle [ id (pathId ++ "-cp2"), cx xCp2Str, cy yCp2Str, r "3", stroke "red", fill "none" ] []
+                , Svg.circle [ id (pathId ++ "-sp"), cx x1Str, cy y1Str, r "3", stroke "blue", fill "blue", onSvgMouseDown (StartDragLinePoint pathId StartPoint), onSvgMouseUp (StopDragLinePoint pathId StartPoint) ] []
+                , Svg.circle [ id (pathId ++ "-ep"), cx x2Str, cy y2Str, r "3", stroke "blue", fill "blue", onSvgMouseDown (StartDragLinePoint pathId EndPoint), onSvgMouseUp (StopDragLinePoint pathId EndPoint) ] []
+                , Svg.circle [ id (pathId ++ "-cp1"), cx xCp1Str, cy yCp1Str, r "3", stroke "red", fill "red", onSvgMouseDown (StartDragLinePoint pathId ControlPoint1), onSvgMouseUp (StopDragLinePoint pathId ControlPoint1) ] []
+                , Svg.circle [ id (pathId ++ "-cp2"), cx xCp2Str, cy yCp2Str, r "3", stroke "red", fill "red", onSvgMouseDown (StartDragLinePoint pathId ControlPoint2), onSvgMouseUp (StopDragLinePoint pathId ControlPoint2) ] []
                 ]
             HoverLine -> 
-                [ Svg.path [ id pathId, d dStr, stroke "black", strokeWidth "1", fill "none", onSvgClick (SelectElement pathId), Svg.Events.onMouseOut (UnhoverElement pathId) ] []
-                --[ Svg.path [ d dStr, stroke "black", fill "none" ] []
-                , Svg.circle [ id (pathId ++ "-sp"), cx x1Str, cy y1Str, r "3", stroke "blue", fill "none" ] []
-                , Svg.circle [ id (pathId ++ "-ep"), cx x2Str, cy y2Str, r "3", stroke "blue", fill "none" ] []
-                , Svg.circle [ id (pathId ++ "-cp1"), cx xCp1Str, cy yCp1Str, r "3", stroke "red", fill "none" ] []
-                , Svg.circle [ id (pathId ++ "-cp2"), cx xCp2Str, cy yCp2Str, r "3", stroke "red", fill "none" ] []
+               [ Svg.path [ id pathId, d dStr, stroke "black", strokeWidth "1", fill "none", onSvgClick (SelectElement pathId), Svg.Events.onMouseOut (UnhoverElement pathId) ] []
+                , Svg.circle [ id (pathId ++ "-sp"), cx x1Str, cy y1Str, r "3", stroke "blue", fill "blue", onSvgMouseDown (StartDragLinePoint pathId StartPoint), onSvgMouseUp (StopDragLinePoint pathId StartPoint) ] []
+                , Svg.circle [ id (pathId ++ "-ep"), cx x2Str, cy y2Str, r "3", stroke "blue", fill "blue", onSvgMouseDown (StartDragLinePoint pathId EndPoint), onSvgMouseUp (StopDragLinePoint pathId EndPoint) ] []
+                , Svg.circle [ id (pathId ++ "-cp1"), cx xCp1Str, cy yCp1Str, r "3", stroke "red", fill "red", onSvgMouseDown (StartDragLinePoint pathId ControlPoint1), onSvgMouseUp (StopDragLinePoint pathId ControlPoint1) ] []
+                , Svg.circle [ id (pathId ++ "-cp2"), cx xCp2Str, cy yCp2Str, r "3", stroke "red", fill "red", onSvgMouseDown (StartDragLinePoint pathId ControlPoint2), onSvgMouseUp (StopDragLinePoint pathId ControlPoint2) ] []
                 ]
-
+ 
 createCurrentDrawingLine : Pos -> Pos -> Svg Msg
 createCurrentDrawingLine startPos endPos = 
     let x1Str = String.fromFloat startPos.x 
@@ -337,46 +265,6 @@ createTriangleLine startPos endPos =
         y2Str = String.fromFloat endPos.y
     in  
         Svg.line [ x1 x1Str, y1 y1Str, x2 x2Str, y2 y2Str, stroke "lightgrey", strokeDasharray "1" ] []
-
-getPositionOfDragPoint : DragBezierPoint -> Pos 
-getPositionOfDragPoint dragPoint = 
-    case dragPoint of 
-        FixedPoint pt -> pt 
-        MovingPoint pt -> pt
-
-getFillOfDragPoint : DragBezierPoint -> String -> String 
-getFillOfDragPoint dragPoint color = 
-    case dragPoint of 
-        FixedPoint _ -> "none"
-        MovingPoint _ -> color
-
-createDragSvgLine : DragBezierLine -> List (Svg Msg)
-createDragSvgLine line = 
-    let 
-        pathId = line.id
-
-        x1Str = String.fromFloat (getPositionOfDragPoint line.start).x 
-        y1Str = String.fromFloat (getPositionOfDragPoint line.start).y 
-        x2Str = String.fromFloat (getPositionOfDragPoint line.end).x 
-        y2Str = String.fromFloat (getPositionOfDragPoint line.end).y
-        xCp1Str = String.fromFloat (getPositionOfDragPoint line.cp1).x
-        yCp1Str = String.fromFloat (getPositionOfDragPoint line.cp1).y
-        xCp2Str = String.fromFloat (getPositionOfDragPoint line.cp2).x
-        yCp2Str = String.fromFloat (getPositionOfDragPoint line.cp2).y
-        dStr = "M" ++ x1Str ++ " " ++ y1Str ++ " C " ++ xCp1Str ++ " " ++ yCp1Str ++ ", " ++ xCp2Str ++ " " ++ yCp2Str ++ ", " ++ x2Str ++ " " ++ y2Str
-    in  
-        [ Svg.path [ id pathId, d dStr, stroke "black", fill "none" ] []
-        , Svg.circle [ cx x1Str, cy y1Str, r "3", stroke "blue", fill (getFillOfDragPoint line.start "blue") ] []
-        , Svg.circle [ cx x2Str, cy y2Str, r "3", stroke "blue", fill (getFillOfDragPoint line.end "blue") ] []
-        , Svg.circle [ cx xCp1Str, cy yCp1Str, r "3", stroke "red", fill (getFillOfDragPoint line.cp1 "red") ] []
-        , Svg.circle [ cx xCp2Str, cy yCp2Str, r "3", stroke "red", fill (getFillOfDragPoint line.cp2 "red") ] []
-        ]            
-
-createDraggingSvgLine : DraggingBezierLine -> List (Svg Msg)
-createDraggingSvgLine line = 
-    case line of 
-        ChangingLine changing -> createDragSvgLine changing
-        FixedLine fixed -> createSvgLine NormalLine fixed
 
 toSvgLines : List BezierLine -> List (Svg Msg)
 toSvgLines lines = 
@@ -416,14 +304,22 @@ processAction : Action -> List BezierLine -> List BezierLine
 processAction act lines = 
     case act of 
         AddLine bezier -> bezier :: lines 
-        EditLine bezier -> 
-            List.map (\line -> if line.id == bezier.id then bezier else line) lines 
+        EditLine id point pos -> 
+            List.map (\line -> if line.id == id then createDragBezier line pos point else line) lines 
         DeleteLine id -> 
             List.filter (\line -> line.id /= id) lines 
 
 getLinesFromHistory : List Action -> List BezierLine
 getLinesFromHistory history = 
     List.foldr processAction [] history
+
+createDragBezier : BezierLine -> Pos -> LinePoint -> BezierLine
+createDragBezier bezier pos point = 
+    case point of 
+        StartPoint -> { bezier | start = pos }
+        EndPoint -> { bezier | end = pos }
+        ControlPoint1 -> { bezier | cp1 = pos }
+        ControlPoint2 -> { bezier | cp2 = pos }
 
 getSvgElements : Model -> List (Svg Msg)
 getSvgElements model = 
@@ -437,6 +333,19 @@ getSvgElements model =
                         currentLine = createCurrentDrawingLine startPos pos 
                     in 
                         currentLine :: svgLines
+                Dragging { id, point } -> 
+                    let
+                        lines = getLinesFromHistory history
+                        svgLines = lines |> List.filter (\line -> line.id /= id) |> toSvgLines
+                    in        
+                        case tryFind (\line -> line.id == id) lines of 
+                            Nothing -> svgLines 
+                            Just bezier -> 
+                                let 
+                                    dragBezier = createDragBezier bezier pos point
+                                    dragLine = createSvgLine SelectedLine dragBezier
+                                in 
+                                    dragLine ++ svgLines
                 Default -> 
                     let
                         lines = getLinesFromHistory history
@@ -455,6 +364,13 @@ getSvgElements model =
                         svgLines = toSvgLinesWithSelection id lines
                     in        
                         svgLines
+                Stopped { id } -> 
+                    let
+                        lines = getLinesFromHistory history
+                        svgLines = toSvgLinesWithSelection id lines
+                    in        
+                        svgLines
+
 
 getMessageElement : Model -> Html Msg 
 getMessageElement model = 
@@ -463,9 +379,13 @@ getMessageElement model =
             case editor of 
                 Drawing _-> 
                     Html.text ("Drawing..." ++ model.status)
+                Dragging _-> 
+                    Html.text ("Dragging..." ++ model.status)
                 Default -> 
                     Html.text ("Default..." ++ model.status)
                 Selected _ -> 
+                    Html.text ("Selected..." ++ model.status)
+                Stopped _ -> 
                     Html.text ("Selected..." ++ model.status)
                 Hovering _ -> 
                     Html.text ("Hovering..." ++ model.status)
@@ -512,7 +432,7 @@ view model =
                                     , Html.Attributes.style "background-color" "white"
                                     , Svg.Events.onClick JustClick
                                     ]
-                                    (svgElements ++ triangleElements) ] ] ] ] 
+                                    (triangleElements ++ svgElements) ] ] ] ] 
                 , td 
                     []
                     [ table 
@@ -541,26 +461,10 @@ subscriptions {editor, reflect, render} =
         offsetX = Decode.field "offsetX" Decode.float
         offsetY = Decode.field "offsetY" Decode.float
     in 
-        onMouseMove (Decode.map2 (\a -> \b -> MouseMove { x = a, y = b }) offsetX offsetY)
-        -- case editor of 
-        --     Drawing _ -> 
-        --         Sub.batch 
-        --         [ onClick (Decode.map2 (\a -> \b -> LeftClick { x = a, y = b }) offsetX offsetY)
-        --         , onMouseMove (Decode.map2 (\a -> \b -> MouseMove { x = a, y = b }) offsetX offsetY) ]
-        --     Dragging _ -> 
-        --         Sub.batch
-        --         [ onMouseUp (Decode.map2 (\a -> \b -> MouseUp { x = a, y = b }) offsetX offsetY)
-        --         , onMouseMove (Decode.map2 (\a -> \b -> MouseMove { x = a, y = b }) offsetX offsetY) ]
-        --     Dragged _ -> 
-        --         Sub.batch
-        --         [ onClick (Decode.map2 (\a -> \b -> MouseUp { x = a, y = b }) offsetX offsetY) ]
-        --     Default _ -> 
-        --         Sub.batch 
-        --         [ --onClick (Decode.map2 (\a -> \b -> LeftClick { x = a, y = b }) offsetX offsetY)
-        --           onMouseDown (Decode.map2 (\a -> \b -> MouseDown { x = a, y = b }) offsetX offsetY)
-        --         , on ]
-        --     Selected _ -> Sub.none
-
+        Sub.batch 
+        [ onMouseMove (Decode.map2 (\a -> \b -> MouseMove { x = a, y = b }) offsetX offsetY) ]
+--        , onMouseUp (Decode.map2 (\a -> \b -> MouseUp { x = a, y = b }) offsetX offsetY) ]
+     
 main : Program () Model Msg
 main =
     Browser.element
