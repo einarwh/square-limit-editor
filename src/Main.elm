@@ -38,7 +38,7 @@ type Action = AddLine BezierLine
               | EditLine LineId LinePoint Pos
               | DeleteLine LineId
 
-type LineStatus = NormalLine | SelectedLine | HoverLine
+type LineStatus = NormalLine | ReflectedLine | SelectedLine | HoverLine
 
 type Editor = 
   Default 
@@ -79,6 +79,7 @@ type Msg = JustClick
            | MouseMove Pos
            | MouseUp Pos
            | ChangeRendering Render 
+           | ToggleReflect 
            | SelectElement LineId
            | UnselectElement LineId
            | HoverElement LineId
@@ -118,6 +119,8 @@ update msg model =
   case msg of 
     ChangeRendering render ->
       ({model | render = render, status = "rendering..."}, Cmd.none)
+    ToggleReflect ->
+      ({model | reflect = not model.reflect, status = "reflect?..."}, Cmd.none)
     _ -> 
       case model of 
         { editor, currentLineNo, reflect, render, history, pos } -> 
@@ -250,6 +253,8 @@ createSvgLine status line =
         case status of 
             NormalLine -> 
                [ Svg.path [ id pathId, d dStr, stroke "black", strokeWidth "1", fill "none", onSvgClick (SelectElement pathId ), Svg.Events.onMouseOver (HoverElement pathId) ] [] ] 
+            ReflectedLine -> 
+               [ Svg.path [ id pathId, d dStr, stroke "grey", strokeWidth "1", fill "none" ] [] ] 
             SelectedLine -> 
                 [ Svg.path [ id pathId, d dStr, stroke "black", strokeWidth "1", fill "none", onSvgClick (UnselectElement pathId) ] []
                 , Svg.circle [ id (pathId ++ "-sp"), cx x1Str, cy y1Str, r "3", stroke "blue", fill "blue", onSvgMouseDown (StartDragLinePoint pathId StartPoint), onSvgMouseUp (StopDragLinePoint pathId StartPoint) ] []
@@ -418,12 +423,28 @@ transposePos : Pos -> Pos
 transposePos { x, y } = 
     { x = x - 100.0, y = y - 100.0 }
 
+untransposePos : Pos -> Pos 
+untransposePos { x, y } = 
+    { x = x + 100.0, y = y + 100.0 }
+
 transposeLine : BezierLine -> BezierLine
 transposeLine line =
     { line | start = transposePos line.start
            , end = transposePos line.end
            , cp1 = transposePos line.cp1
            , cp2 = transposePos line.cp2 }
+
+untransposeLine : BezierLine -> BezierLine
+untransposeLine line =
+    { line | start = untransposePos line.start
+           , end = untransposePos line.end
+           , cp1 = untransposePos line.cp1
+           , cp2 = untransposePos line.cp2 }
+
+scalePos : Float -> Pos -> Pos 
+scalePos factor { x, y } = 
+    { x = factor * x, y = factor * y }
+
 
 shrinkPos : Pos -> Pos 
 shrinkPos { x, y } = 
@@ -454,6 +475,44 @@ lineToShape line =
     , point3 = line.cp2
     , point4 = line.end } |> Curve
 
+transformLine : (Pos -> Pos) -> BezierLine -> BezierLine 
+transformLine tr line = 
+    { line | start = tr line.start
+           , end = tr line.end
+           , cp1 = tr line.cp1
+           , cp2 = tr line.cp2 }
+
+tagLine : String -> BezierLine -> BezierLine 
+tagLine tag line = 
+    { line | id = line.id ++ "-" ++ tag }
+
+reflectLine1 : BezierLine -> BezierLine
+reflectLine1 line = 
+    line |> transposeLine 
+         |> mirrorLine 
+         |> transformLine (Triangular.rotate 90)
+         |> mirrorLine 
+         |> untransposeLine
+         |> tagLine "reflect-1"
+
+reflectLine2 : BezierLine -> BezierLine
+reflectLine2 line = 
+    line |> transposeLine 
+         |> mirrorLine 
+         |> transformLine (Triangular.transform 315 { x = 200, y = 0 })
+         |> mirrorLine 
+         |> untransposeLine
+         |> tagLine "reflect-2"
+
+
+createReflectionLines1 : List BezierLine -> List BezierLine
+createReflectionLines1 lines = 
+    lines |> List.filter (\line -> line.reflect) |> List.map reflectLine1
+
+createReflectionLines2 : List BezierLine -> List BezierLine
+createReflectionLines2 lines = 
+    lines |> List.filter (\line -> line.reflect) |> List.map reflectLine2
+
 view : Model -> Html Msg
 view model =
     let
@@ -470,8 +529,41 @@ view model =
                 Tile -> ttile 
                 Limit -> squareLimit 3
         lines = getLinesFromHistory model.history
+        -- reflectionsLines1 = createReflectionLines1 lines 
+        -- reflectionElements1 = reflectionsLines1 |> List.concatMap (createSvgLine ReflectedLine)
+        -- reflectionsLines2 = createReflectionLines2 lines 
+        -- reflectionElements2 = reflectionsLines2 |> List.concatMap (createSvgLine ReflectedLine)
         standardLines = List.map (transposeLine >> mirrorLine >> shrinkLine) lines
-        shapes = List.map lineToShape standardLines
+        linesToReflect = List.filter (\line -> line.reflect) standardLines
+        standardReflections1 = 
+            linesToReflect 
+            |> List.map (transformLine (Triangular.rotate 90))
+        reflectionLines1 = 
+            standardReflections1 
+            |> List.map (transformLine (scalePos 200.0))
+            |> List.map (mirrorLine)
+            |> List.map (untransposeLine)
+        standardReflections2 = 
+            linesToReflect 
+            |> List.map (transformLine (Triangular.transform 315 { x = 0, y = 1 }))
+        reflectionLines2 = 
+            standardReflections2 
+            |> List.map (transformLine (scalePos 200.0))
+            |> List.map (mirrorLine)
+            |> List.map (untransposeLine)
+        standardReflections3 = 
+            linesToReflect 
+            |> List.map (transformLine (Triangular.transform 135 { x = 1, y = 0 }))
+        reflectionLines3 = 
+            standardReflections3 
+            |> List.map (transformLine (scalePos 200.0))
+            |> List.map (mirrorLine)
+            |> List.map (untransposeLine)
+        renderLines = standardLines ++ standardReflections1 ++ standardReflections2 ++ standardReflections3
+        reflectionElements1 = reflectionLines1 |> List.concatMap (createSvgLine ReflectedLine)
+        reflectionElements2 = reflectionLines2 |> List.concatMap (createSvgLine ReflectedLine)
+        reflectionElements3 = reflectionLines3 |> List.concatMap (createSvgLine ReflectedLine)
+        shapes = List.map lineToShape renderLines
         box = { a = { dx = 100.0, dy = 100.0 }
               , b = { dx = 200.0, dy = 0.0 }
               , c = { dx = 0.0, dy = 200.0 } }
@@ -483,8 +575,9 @@ view model =
     in
         div [] 
         [
-          div [] [ msgElement ]
-        , table 
+        --  div [] [ msgElement ]
+        --, 
+          table 
             [] 
             [ tr 
                 [] 
@@ -497,7 +590,7 @@ view model =
                             [ td 
                                 [] 
                                 [ 
-                                  Html.input [ id "reflect", type_ "checkbox" ] []
+                                  Html.input [ id "reflect", type_ "checkbox", Html.Attributes.checked model.reflect, Html.Events.onInput (\_ -> (ToggleReflect)) ] []
                                 , Html.label [ Html.Attributes.for "reflect" ] [ Html.text "Reflect" ]
                                 , Html.button [ Html.Events.onClick UndoAction ] [ Html.text "Undo" ]
                                 , Html.button [ Html.Events.onClick DeleteSelected ] [ Html.text "Delete" ] ] ] 
@@ -512,7 +605,7 @@ view model =
                                     , Html.Attributes.style "background-color" "white"
                                     , Svg.Events.onClick JustClick
                                     ]
-                                    (triangleElements ++ svgElements) ] ] ] ] 
+                                    (triangleElements ++ reflectionElements1 ++ reflectionElements2 ++ reflectionElements3 ++ svgElements) ] ] ] ] 
                 , td 
                     []
                     [ table 
