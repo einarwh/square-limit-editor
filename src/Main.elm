@@ -13,6 +13,7 @@ import Box exposing (..)
 import Picture exposing (..)
 import Gather exposing (gatherBoxes)
 import Recursion exposing (sideBoxes, cornerBoxes)
+import Shape exposing (..)
 import Letter exposing (..)
 import Figure exposing (..)
 import Fishy exposing (fishShapes)
@@ -413,6 +414,46 @@ renderChoice idValue render model textValue =
       [ Html.input [ type_ "radio", id idValue, name "render", Html.Attributes.checked checkedValue, Html.Events.onInput (\_ -> (ChangeRendering render)) ] []
       , Html.label [ Html.Attributes.for idValue ] [ Html.text textValue ] ]
 
+transposePos : Pos -> Pos 
+transposePos { x, y } = 
+    { x = x - 100.0, y = y - 100.0 }
+
+transposeLine : BezierLine -> BezierLine
+transposeLine line =
+    { line | start = transposePos line.start
+           , end = transposePos line.end
+           , cp1 = transposePos line.cp1
+           , cp2 = transposePos line.cp2 }
+
+shrinkPos : Pos -> Pos 
+shrinkPos { x, y } = 
+    { x = x / 200.0, y = y / 200.0 }
+
+mirrorPos : Pos -> Pos 
+mirrorPos { x, y } = 
+    { x = x, y = 200 - y }
+
+mirrorLine : BezierLine -> BezierLine 
+mirrorLine line = 
+    { line | start = mirrorPos line.start
+           , end = mirrorPos line.end
+           , cp1 = mirrorPos line.cp1
+           , cp2 = mirrorPos line.cp2 }
+
+shrinkLine : BezierLine -> BezierLine 
+shrinkLine line = 
+    { line | start = shrinkPos line.start
+           , end = shrinkPos line.end
+           , cp1 = shrinkPos line.cp1
+           , cp2 = shrinkPos line.cp2 }
+
+lineToShape : BezierLine -> Shape 
+lineToShape line = 
+    { point1 = line.start
+    , point2 = line.cp1
+    , point3 = line.cp2
+    , point4 = line.end } |> Curve
+
 view : Model -> Html Msg
 view model =
     let
@@ -423,15 +464,18 @@ view model =
           , createTriangleLine { x = 100.0, y = 300.0 } { x = 300.0, y = 300.0 }
           , createTriangleLine { x = 100.0, y = 100.0 } { x = 300.0, y = 300.0 }
           ]
-        box = { a = { dx = 100.0, dy = 100.0 }
-              , b = { dx = 200.0, dy = 0.0 }
-              , c = { dx = 0.0, dy = 200.0 } }
-        pict = createPicture fLetter
         transform = 
             case model.render of 
                 Simple -> identity 
                 Tile -> ttile 
                 Limit -> squareLimit 3
+        lines = getLinesFromHistory model.history
+        standardLines = List.map (transposeLine >> mirrorLine >> shrinkLine) lines
+        shapes = List.map lineToShape standardLines
+        box = { a = { dx = 100.0, dy = 100.0 }
+              , b = { dx = 200.0, dy = 0.0 }
+              , c = { dx = 0.0, dy = 200.0 } }
+        pict = createPicture shapes
         rendering = box |> transform pict |> render []
         renderChoices = renderChoice "simple" Simple model.render "Simple"
                         ++ renderChoice "tile" Tile model.render "Tile"
@@ -447,7 +491,7 @@ view model =
                 [ td 
                     []
                     [ table 
-                        [ Html.Attributes.style "background-color" "pink" ] 
+                        [ Html.Attributes.style "background-color" "white" ] 
                         [ tr 
                             []
                             [ td 
@@ -472,7 +516,7 @@ view model =
                 , td 
                     []
                     [ table 
-                        [ Html.Attributes.style "background-color" "green" ] 
+                        [ Html.Attributes.style "background-color" "white" ] 
                         [ tr 
                             [] 
                             renderChoices
