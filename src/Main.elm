@@ -591,7 +591,7 @@ view model =
         reflectionElements3 = reflectionLines3 |> List.concatMap (createSvgLine ReflectedLine)
         shapes = List.map lineToShape renderLines
         bezierStrings = List.map lineToString renderLines
-        bezierListHtml = bezierStrings |> List.map (\s -> Html.p [] [ Html.text s ])
+        bezierListHtml = bezierStrings |> List.concatMap (\s -> [ Html.text s, Html.br [] []])
         box = { a = { dx = 100.0, dy = 100.0 }
               , b = { dx = 200.0, dy = 0.0 }
               , c = { dx = 0.0, dy = 200.0 } }
