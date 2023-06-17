@@ -475,6 +475,32 @@ lineToShape line =
     , point3 = line.cp2
     , point4 = line.end } |> Curve
 
+coordToString : Float -> String 
+coordToString f = 
+    let
+        len = if f < 0 then 6 else 5        
+    in
+        f |> String.fromFloat |> String.padRight len '0' |> String.left len
+
+posToString : Pos -> String 
+posToString pos =
+    let
+
+        xs = coordToString pos.x
+        ys = coordToString pos.y
+    in
+        ["(", xs, ", ", ys, ")"] |> String.concat
+
+lineToString : BezierLine -> String 
+lineToString line = 
+    let
+        s1 = posToString line.start
+        s2 = posToString line.cp1
+        s3 = posToString line.cp2
+        s4 = posToString line.end
+    in
+        [s1, s2, s3, s4] |> String.join ", "
+
 transformLine : (Pos -> Pos) -> BezierLine -> BezierLine 
 transformLine tr line = 
     { line | start = tr line.start
@@ -564,6 +590,8 @@ view model =
         reflectionElements2 = reflectionLines2 |> List.concatMap (createSvgLine ReflectedLine)
         reflectionElements3 = reflectionLines3 |> List.concatMap (createSvgLine ReflectedLine)
         shapes = List.map lineToShape renderLines
+        bezierStrings = List.map lineToString renderLines
+        bezierListHtml = bezierStrings |> List.map (\s -> Html.p [] [ Html.text s ])
         box = { a = { dx = 100.0, dy = 100.0 }
               , b = { dx = 200.0, dy = 0.0 }
               , c = { dx = 0.0, dy = 200.0 } }
@@ -617,7 +645,7 @@ view model =
                             [] 
                             [ td 
                                 [] 
-                                [rendering] ]]]]
+                                [rendering] ] ] ] ]
                                 -- [ svg
                                 --     [ width "400"
                                 --     , height "400"
@@ -625,7 +653,12 @@ view model =
                                 --     , Html.Attributes.style "background-color" "yellow"
                                 --     ]
                                 --     svgElements] ] ] ] ]
-                    ] ] 
+            
+            , tr 
+                [] 
+                [ td 
+                  [] 
+                  [ Html.div [] bezierListHtml ] ] ] ] 
 
 subscriptions : Model -> Sub Msg
 subscriptions {editor, reflect, render} =
