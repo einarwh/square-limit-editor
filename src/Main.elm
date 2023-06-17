@@ -48,7 +48,7 @@ type Editor =
   | Dragging { id: LineId, point: LinePoint }
   | Stopped { id : LineId }
 
-type Render = Simple | Tile | Limit
+type Render = Simple | Tile | Limit | Smaller
 
 type alias Model = 
   { editor : Editor
@@ -554,6 +554,7 @@ view model =
                 Simple -> identity 
                 Tile -> ttile 
                 Limit -> squareLimit 3
+                Smaller -> smallerandsmaller 3
         lines = getLinesFromHistory model.history
         -- reflectionsLines1 = createReflectionLines1 lines 
         -- reflectionElements1 = reflectionsLines1 |> List.concatMap (createSvgLine ReflectedLine)
@@ -600,6 +601,7 @@ view model =
         renderChoices = renderChoice "simple" Simple model.render "Simple"
                         ++ renderChoice "tile" Tile model.render "Tile"
                         ++ renderChoice "limit" Limit model.render "Limit" 
+                        ++ renderChoice "smaller" Smaller model.render "Smaller"
     in
         div [] 
         [
